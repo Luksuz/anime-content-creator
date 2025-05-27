@@ -102,8 +102,7 @@ export async function POST(request: NextRequest) {
         console.log(`   🎤 Generating audio using ${provider}...`);
 
         // Call the existing audio generation API
-        const baseUrl = "http://localhost:3000"
-          
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
         console.log(`   🔗 Making request to: ${baseUrl}/api/generate-audio`);
         
         const audioResponse = await fetch(`${baseUrl}/api/generate-audio`, {

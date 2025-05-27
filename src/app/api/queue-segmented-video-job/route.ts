@@ -132,7 +132,7 @@ async function processSegmentedVideo({
     console.log(`🎬 [PROCESS-SEGMENTED-VIDEO] Starting segmented video processing for job ${videoId}`);
 
     // Create the video processing request with timing data
-    const processingUrl = `http://localhost:3000/api/process-segmented-video`;
+    const processingUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/process-segmented-video`;
     console.log(`📡 [PROCESS-SEGMENTED-VIDEO] Making request to: ${processingUrl}`);
     
     const requestPayload = {

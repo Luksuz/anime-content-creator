@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     // Queue the video processing job
     try {
       console.log('🚀 [CREATE-SEGMENTED-VIDEO] Queuing video processing job...');
-      const jobQueueResponse = await fetch(`http://localhost:3000/api/queue-segmented-video-job`, {
+      const jobQueueResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/queue-segmented-video-job`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
