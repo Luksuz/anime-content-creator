@@ -132,7 +132,16 @@ async function processYAxisCuts(
   const sortedPositions = [0, ...validYCutPositions.sort((a: number, b: number) => a - b), metadata.height! - 5];
   const uniquePositions = Array.from(new Set(sortedPositions));
   
-  for (let i = 0; i < uniquePositions.length - 1; i++) {
+  // Skip first and last pieces - start from index 1 and end before last
+  const startIndex = 1;
+  const endIndex = uniquePositions.length - 2;
+  
+  if (endIndex <= startIndex) {
+    console.log('Not enough pieces to exclude first and last - need at least 3 pieces');
+    return;
+  }
+  
+  for (let i = startIndex; i < endIndex; i++) {
     const startY = Math.floor(uniquePositions[i]);
     const endY = Math.floor(uniquePositions[i + 1]);
     const height = endY - startY;
@@ -178,6 +187,8 @@ async function processYAxisCuts(
         width: extractParams.width,
         buffer: base64
       });
+      
+      console.log(`✅ Y-axis piece extracted (excluding first/last): Y ${startY}-${endY} (piece ${i - startIndex + 1})`);
     } catch (extractError: any) {
       console.error(`Error extracting Y-axis piece:`, extractError.message);
       continue;
@@ -279,8 +290,17 @@ async function processGridCuts(
   const sortedYPositions = [0, ...validYCutPositions.sort((a: number, b: number) => a - b), metadata.height! - 5];
   const uniqueYPositions = Array.from(new Set(sortedYPositions));
   
-  // Create pieces only from the middle X section, but all Y sections
-  for (let j = 0; j < uniqueYPositions.length - 1; j++) {
+  // Skip first and last pieces - start from index 1 and end before last
+  const startIndex = 1;
+  const endIndex = uniqueYPositions.length - 2;
+  
+  if (endIndex <= startIndex) {
+    console.log('Not enough pieces to exclude first and last in grid - need at least 3 Y-axis pieces');
+    return;
+  }
+  
+  // Create pieces only from the middle X section, but exclude first and last Y sections
+  for (let j = startIndex; j < endIndex; j++) {
     const startY = Math.floor(uniqueYPositions[j]);
     const endY = Math.floor(uniqueYPositions[j + 1]);
     
@@ -324,7 +344,7 @@ async function processGridCuts(
         buffer: base64
       });
 
-      console.log(`✅ Grid piece extracted: X ${middleStartX}-${middleEndX}, Y ${startY}-${endY}`);
+      console.log(`✅ Grid piece extracted (excluding first/last): X ${middleStartX}-${middleEndX}, Y ${startY}-${endY} (piece ${j - startIndex + 1})`);
     } catch (extractError: any) {
       console.error(`Error extracting grid piece:`, extractError.message);
       continue;
