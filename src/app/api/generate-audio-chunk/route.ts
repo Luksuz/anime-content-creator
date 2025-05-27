@@ -49,14 +49,15 @@ export async function POST(request: NextRequest) {
       attemptCount++;
       
       // Get a valid API key from the database
-      const apiKey = await getValidApiKey();
-      if (!apiKey) {
-        console.log(`❌ No valid API keys available after ${attemptCount} attempts`);
-        return NextResponse.json(
-          { error: 'No valid WellSaid Labs API keys available. Please upload API keys first.' },
-          { status: 400 }
-        );
-      }
+    //   const apiKey = await getValidApiKey();
+    //   if (!apiKey) {
+    //     console.log(`❌ No valid API keys available after ${attemptCount} attempts`);
+    //     return NextResponse.json(
+    //       { error: 'No valid WellSaid Labs API keys available. Please upload API keys first.' },
+    //       { status: 400 }
+    //     );
+    //   }
+      const apiKey = "3ae0d806-3e6a-4ba5-a0d8-063e6a6ba50c"
 
       console.log(`🔑 Attempt ${attemptCount}: Using WellSaid Labs API key for chunk ${chunkIndex} generation`);
 

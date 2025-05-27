@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { uploadFileToSupabase } from '@/utils/supabase-utils';
 import sharp from 'sharp';
 
 export async function POST(request: NextRequest) {
@@ -51,9 +50,15 @@ export async function POST(request: NextRequest) {
     
     console.log(`Final positions for cutting:`, uniquePositions);
     
-    const cutImages: { url: string; startY: number; endY: number; height: number }[] = [];
+    const cutImages: { 
+      dataUrl: string; 
+      startY: number; 
+      endY: number; 
+      height: number;
+      buffer: string; // base64 encoded buffer for later saving
+    }[] = [];
 
-    // Cut the image into pieces
+    // Cut the image into pieces (but don't upload yet)
     for (let i = 0; i < uniquePositions.length - 1; i++) {
       const startY = Math.floor(uniquePositions[i]);
       const endY = Math.floor(uniquePositions[i + 1]);
@@ -93,16 +98,12 @@ export async function POST(request: NextRequest) {
       }
 
       console.log(`Cutting piece ${i + 1}: Y ${startY} to ${endY} (height: ${height})`);
-      console.log(`Extract params:`, extractParams);
-      console.log(`Image dimensions: ${metadata.width}x${metadata.height}`);
-      console.log(`Validation: top + height = ${extractParams.top + extractParams.height} <= ${metadata.height!}`);
 
       try {
         // Create a fresh Sharp instance for each extraction to avoid any state issues
         const freshImage = sharp(imageBuffer);
         
-        // Use a different approach: crop instead of extract
-        // First, we'll create a region that starts from our desired Y position
+        // Extract the piece as PNG buffer
         const piece = await freshImage
           .extract({
             left: 0,
@@ -113,28 +114,19 @@ export async function POST(request: NextRequest) {
           .png()
           .toBuffer();
 
-        // Upload to Supabase
-        const timestamp = Date.now();
-        const fileName = `cut_${i + 1}_${timestamp}.png`;
-        const destinationPath = `${userId}/cut_images/${fileName}`;
-        
-        const publicUrl = await uploadFileToSupabase(
-          piece,
-          destinationPath,
-          'image/png'
-        );
+        // Convert to base64 data URL for preview
+        const base64 = piece.toString('base64');
+        const dataUrl = `data:image/png;base64,${base64}`;
 
-        if (publicUrl) {
-          cutImages.push({
-            url: publicUrl,
-            startY,
-            endY,
-            height: extractParams.height // Use actual extracted height
-          });
-          console.log(`✅ Piece ${i + 1} uploaded successfully:`, publicUrl);
-        } else {
-          console.error(`❌ Failed to upload piece ${i + 1}`);
-        }
+        cutImages.push({
+          dataUrl: dataUrl,
+          startY,
+          endY,
+          height: extractParams.height,
+          buffer: base64 // Store base64 for later saving
+        });
+        
+        console.log(`✅ Piece ${i + 1} processed successfully`);
       } catch (extractError: any) {
         console.error(`❌ Error extracting piece ${i + 1}:`, extractError.message);
         console.error(`Failed extract params:`, extractParams);
@@ -150,7 +142,7 @@ export async function POST(request: NextRequest) {
       success: true,
       cutImages,
       totalPieces: cutImages.length,
-      message: `Successfully cut image into ${cutImages.length} pieces`
+      message: `Successfully cut image into ${cutImages.length} pieces (ready for preview)`
     });
 
   } catch (error: any) {
@@ -160,4 +152,6 @@ export async function POST(request: NextRequest) {
       details: error.message 
     }, { status: 500 });
   }
-} 
+}
+
+export const dynamic = 'force-dynamic'; 

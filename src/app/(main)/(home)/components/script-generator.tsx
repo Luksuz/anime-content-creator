@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Interface for scraped and cut images
-interface CutImage {
+interface SavedCutImage {
   url: string;
   startY: number;
   endY: number;
@@ -42,10 +42,10 @@ interface ScriptSegment {
 interface ScriptGeneratorProps {
   onFullScriptChange?: (data: { scriptWithMarkdown: string, scriptCleaned: string }) => void;
   currentFullScript?: string;
-  scrapedImages?: CutImage[];
+  scrapedImages?: SavedCutImage[];
   onNarrationsGenerated?: (narrations: NarrationChunk[]) => void;
   generatedNarrations?: NarrationChunk[];
-  onScrapedImagesChange?: (images: CutImage[]) => void;
+  onScrapedImagesChange?: (images: SavedCutImage[]) => void;
   userId?: string;
   onApprove?: () => void;
 }

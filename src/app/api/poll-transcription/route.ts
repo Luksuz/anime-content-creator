@@ -44,8 +44,30 @@ export async function POST(request: NextRequest) {
     const statusData = await statusResponse.json();
     const status = statusData.data?.attributes?.status;
     const transcriptionStatus = statusData.data?.attributes?.outputs?.transcription?.status;
+    const progress = statusData.data?.attributes?.progress || 0;
 
-    console.log(`📊 Transcription status: ${status} / transcription: ${transcriptionStatus}`);
+    console.log(`📊 Transcription status: ${status} / transcription: ${transcriptionStatus} (${progress}% complete)`);
+
+    // Determine detailed status and user-friendly message
+    let detailedStatus = 'processing';
+    let userMessage = 'Processing transcription...';
+    let stage = 'analyzing';
+
+    if (status === 'uploading' || status === 'uploaded') {
+      stage = 'uploading';
+      userMessage = 'Uploading audio file for transcription...';
+    } else if (status === 'processing') {
+      if (transcriptionStatus === 'processing') {
+        stage = 'transcribing';
+        userMessage = 'Analyzing audio and generating transcript...';
+      } else {
+        stage = 'preparing';
+        userMessage = 'Preparing audio for transcription...';
+      }
+    } else if (status === 'ready' && transcriptionStatus === 'processing') {
+      stage = 'transcribing';
+      userMessage = 'Generating transcript from audio...';
+    }
 
     // If transcription is complete, download and save the SRT file
     if (status === 'ready' && transcriptionStatus === 'ready') {
@@ -53,44 +75,75 @@ export async function POST(request: NextRequest) {
       
       console.log(`📥 Downloading transcription from: ${transcriptionUrl}`);
       
-      // Download SRT content
-      const srtResponse = await fetch(transcriptionUrl);
-      if (!srtResponse.ok) {
-        throw new Error(`Failed to download SRT content: ${srtResponse.status}`);
+      try {
+        // Update status to indicate we're downloading
+        detailedStatus = 'downloading';
+        userMessage = 'Downloading and saving transcript...';
+        
+        // Download SRT content
+        const srtResponse = await fetch(transcriptionUrl);
+        if (!srtResponse.ok) {
+          throw new Error(`Failed to download SRT content: ${srtResponse.status}`);
+        }
+
+        const srtContent = await srtResponse.text();
+
+        // Upload to our Supabase storage
+        const timestamp = Date.now();
+        const fileName = `transcription_${timestamp}.srt`;
+        const destinationPath = `${userId}/subtitles/${fileName}`;
+
+        const srtBuffer = Buffer.from(srtContent, 'utf-8');
+        const supabaseUrl = await uploadFileToSupabase(srtBuffer, destinationPath, 'text/srt');
+
+        if (!supabaseUrl) {
+          throw new Error("Failed to upload SRT to Supabase storage");
+        }
+
+        console.log(`✅ Transcription completed and uploaded: ${supabaseUrl}`);
+
+        return NextResponse.json({
+          status: 'completed',
+          subtitlesUrl: supabaseUrl,
+          message: 'Transcription completed successfully!',
+          stage: 'completed',
+          progress: 100,
+          details: {
+            originalUrl: transcriptionUrl,
+            fileName: fileName,
+            uploadedAt: new Date().toISOString()
+          }
+        });
+      } catch (downloadError: any) {
+        console.error(`❌ Error downloading/uploading transcription:`, downloadError);
+        return NextResponse.json({
+          status: 'failed',
+          error: 'Failed to download and save transcription',
+          message: 'Transcription was generated but failed to save to our storage',
+          details: downloadError.message
+        });
       }
-
-      const srtContent = await srtResponse.text();
-
-      // Upload to our Supabase storage
-      const timestamp = Date.now();
-      const fileName = `transcription_${timestamp}.srt`;
-      const destinationPath = `${userId}/subtitles/${fileName}`;
-
-      const srtBuffer = Buffer.from(srtContent, 'utf-8');
-      const supabaseUrl = await uploadFileToSupabase(srtBuffer, destinationPath, 'text/srt');
-
-      if (!supabaseUrl) {
-        throw new Error("Failed to upload SRT to Supabase storage");
-      }
-
-      console.log(`✅ Transcription completed and uploaded: ${supabaseUrl}`);
-
-      return NextResponse.json({
-        status: 'completed',
-        subtitlesUrl: supabaseUrl,
-        message: 'Transcription completed successfully'
-      });
     } else if (status === 'failed' || transcriptionStatus === 'failed') {
       console.error(`❌ Transcription job failed`);
       return NextResponse.json({
         status: 'failed',
-        error: 'Transcription job failed'
+        error: 'Transcription job failed',
+        message: 'The transcription service encountered an error',
+        stage: 'failed',
+        progress: 0
       });
     } else {
-      // Still processing
+      // Still processing - return detailed status
       return NextResponse.json({
         status: 'processing',
-        message: `Transcription in progress: ${status} / ${transcriptionStatus}`
+        message: userMessage,
+        stage: stage,
+        progress: Math.min(progress, 95), // Cap at 95% until actually complete
+        details: {
+          shotstackStatus: status,
+          transcriptionStatus: transcriptionStatus,
+          jobId: transcriptionJobId
+        }
       });
     }
 
@@ -98,7 +151,9 @@ export async function POST(request: NextRequest) {
     console.error('❌ Error polling transcription:', error);
     return NextResponse.json({ 
       error: 'Failed to poll transcription status',
-      details: error.message 
+      details: error.message,
+      message: 'Unable to check transcription progress. Please try again.',
+      status: 'error'
     }, { status: 500 });
   }
 }

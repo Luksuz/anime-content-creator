@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (imageUrls.length > 20) {
+    if (imageUrls.length > 200) {
       console.error('❌ [CREATE-SEGMENTED-VIDEO] Validation failed: Too many images', {
         imageUrlsLength: imageUrls.length
       });

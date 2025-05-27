@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo } from "react";
 import { GeneratedImageSet } from "@/types/image-generation";
 
 // Interface for scraped and cut images
-interface CutImage {
+interface SavedCutImage {
   url: string;
   startY: number;
   endY: number;
@@ -40,7 +40,7 @@ interface VideoGeneratorProps {
   onStartVideoCreation: (selectedImageUrls: string[]) => Promise<void>;
   thumbnailUrl?: string | null;
   // New props for segmented video creation
-  scrapedImages?: CutImage[];
+  scrapedImages?: SavedCutImage[];
   segmentedAudioResult?: SegmentedAudioResult | null;
   onStartSegmentedVideoCreation?: (data: { 
     imageUrls: string[], 

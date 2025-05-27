@@ -11,6 +11,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface CutImage {
+  dataUrl: string;
+  startY: number;
+  endY: number;
+  height: number;
+  buffer: string;
+}
+
+interface SavedCutImage {
   url: string;
   startY: number;
   endY: number;
@@ -18,7 +26,7 @@ interface CutImage {
 }
 
 interface ImageScrapingProps {
-  onScrapedImagesChange?: (images: CutImage[]) => void;
+  onScrapedImagesChange?: (images: SavedCutImage[]) => void;
 }
 
 const ImageScraping: React.FC<ImageScrapingProps> = ({
@@ -42,6 +50,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
 
   // Tab 3: Cut Images Management
   const [cutImages, setCutImages] = useState<CutImage[]>([]);
+  const [savedCutImages, setSavedCutImages] = useState<SavedCutImage[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [imagesSaved, setImagesSaved] = useState(false);
 
@@ -78,6 +87,11 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
 
       setScreenshotUrl(data.screenshotUrl);
       console.log('Screenshot taken:', data.screenshotUrl);
+      
+      // Log additional info if available
+      if (data.originalFirecrawlUrl) {
+        console.log('Note: Using external Firecrawl URL due to download issues');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to take screenshot');
     } finally {
@@ -128,6 +142,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
     setIsCutting(true);
     setError(null);
     setImagesSaved(false);
+    setSavedCutImages([]); // Clear any previously saved images
 
     try {
       const response = await fetch('/api/cut-image', {
@@ -149,7 +164,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
       }
 
       setCutImages(data.cutImages);
-      console.log(`Image cut into ${data.totalPieces} pieces`);
+      console.log(`Image cut into ${data.totalPieces} pieces (ready for preview)`);
     } catch (err: any) {
       setError(err.message || 'Failed to cut image');
     } finally {
@@ -157,32 +172,58 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
     }
   };
 
-  // Save cut images (call parent callback)
-  const handleSaveImages = () => {
-    if (onScrapedImagesChange) {
-      onScrapedImagesChange(cutImages);
+  // Save cut images (upload to Supabase and call parent callback)
+  const handleSaveImages = async () => {
+    if (cutImages.length === 0) {
+      setError("No cut images to save");
+      return;
     }
+
     setIsSaving(true);
-    setImagesSaved(true);
-    setTimeout(() => setIsSaving(false), 2000); // Visual feedback
+    setError(null);
+
+    try {
+      const response = await fetch('/api/save-cut-images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cutImages,
+          userId: actualUserId
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save cut images');
+      }
+
+      setSavedCutImages(data.savedImages);
+      setImagesSaved(true);
+      
+      // Call parent callback with saved images
+      if (onScrapedImagesChange) {
+        onScrapedImagesChange(data.savedImages);
+      }
+
+      console.log(`Successfully saved ${data.totalSaved} cut images`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save cut images');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Download individual image
-  const downloadImage = (url: string, filename: string) => {
-    fetch(url)
-      .then(response => response.blob())
-      .then(blob => {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-      })
-      .catch(err => {
-        console.error("Failed to download image:", err);
-      });
+  const downloadImage = (dataUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Clear everything
@@ -453,7 +494,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                 <div className="flex gap-2">
                   <Button
                     onClick={handleSaveImages}
-                    disabled={isSaving}
+                    disabled={isSaving || cutImages.length === 0}
                     className={`flex items-center gap-2 ${(isSaving || imagesSaved) ? 'bg-green-600 hover:bg-green-700' : ''}`}
                   >
                     {isSaving ? (
@@ -462,7 +503,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        <span>Saved!</span>
+                        <span>Saving...</span>
                       </>
                     ) : imagesSaved ? (
                       <>
@@ -486,7 +527,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                   {cutImages.map((image, index) => (
                     <div key={index} className="border rounded-lg overflow-hidden shadow-lg">
                       <img
-                        src={image.url}
+                        src={image.dataUrl}
                         alt={`Cut piece ${index + 1}`}
                         className="w-full h-48 object-cover"
                       />
@@ -503,7 +544,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => downloadImage(image.url, `piece_${index + 1}.png`)}
+                          onClick={() => downloadImage(image.dataUrl, `piece_${index + 1}.png`)}
                           className="w-full flex items-center gap-2"
                         >
                           <Download className="h-3 w-3" />
@@ -515,7 +556,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                 </div>
               </ScrollArea>
 
-              {isSaving && (
+              {imagesSaved && (
                 <div className="p-4 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">
                   <div className="flex items-start">
                     <svg className="h-5 w-5 mr-2 text-green-600 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
@@ -523,7 +564,7 @@ const ImageScraping: React.FC<ImageScrapingProps> = ({
                     </svg>
                     <div>
                       <p className="font-medium">Images saved to system!</p>
-                      <p className="mt-1">All {cutImages.length} cut pieces have been saved and are available for use in other parts of the application.</p>
+                      <p className="mt-1">All {savedCutImages.length} cut pieces have been uploaded to Supabase and are available for use in other parts of the application.</p>
                     </div>
                   </div>
                 </div>

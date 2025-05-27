@@ -106,6 +106,14 @@ export interface SegmentedAudioResult {
 }
 
 export interface CutImage {
+  dataUrl: string;
+  startY: number;
+  endY: number;
+  height: number;
+  buffer: string;
+}
+
+export interface SavedCutImage {
   url: string;
   startY: number;
   endY: number;

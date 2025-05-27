@@ -53,14 +53,6 @@ interface AudioGeneratorProps {
   onSubtitlesToggle?: (enabled: boolean) => void;
 }
 
-// WellSaid Labs speaker options
-const wellSaidSpeakers = [
-  { id: 3, name: "Default Speaker" },
-  { id: 1, name: "Speaker 1" },
-  { id: 2, name: "Speaker 2" },
-  { id: 4, name: "Speaker 4" },
-  { id: 5, name: "Speaker 5" },
-];
 
 // WellSaid Labs speaker options organized by language and style
 const wellSaidVoices = {
@@ -245,6 +237,17 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
   }>({ current: 0, total: 0, phase: 'chunks' });
   const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
 
+  // State for enhanced transcription feedback
+  const [transcriptionProgress, setTranscriptionProgress] = useState<{
+    stage: string;
+    message: string;
+    progress: number;
+  }>({
+    stage: 'waiting',
+    message: 'Waiting to start transcription...',
+    progress: 0
+  });
+
   useEffect(() => {
     if (initialText) {
       setTextToConvert(initialText);
@@ -367,7 +370,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
     };
   };
 
-  // Poll transcription status
+  // Poll transcription status with enhanced feedback
   const pollTranscriptionStatus = async (jobId: string): Promise<string | null> => {
     const response = await fetch("/api/poll-transcription", {
       method: "POST",
@@ -384,9 +387,28 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
       throw new Error(data.error || "Failed to poll transcription status");
     }
 
+    // Update transcription progress with detailed feedback
+    if (data.stage && data.message && typeof data.progress === 'number') {
+      setTranscriptionProgress({
+        stage: data.stage,
+        message: data.message,
+        progress: data.progress
+      });
+    }
+
     if (data.status === 'completed') {
+      setTranscriptionProgress({
+        stage: 'completed',
+        message: 'Transcription completed successfully!',
+        progress: 100
+      });
       return data.subtitlesUrl;
     } else if (data.status === 'failed') {
+      setTranscriptionProgress({
+        stage: 'failed',
+        message: data.message || 'Transcription failed',
+        progress: 0
+      });
       throw new Error(data.error || "Transcription failed");
     }
 
@@ -495,6 +517,13 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         setTranscriptionJobId(concatenationResult.transcriptionJobId);
         setGenerationProgress({ current: 0, total: 1, phase: 'transcribing' });
         
+        // Reset transcription progress
+        setTranscriptionProgress({
+          stage: 'starting',
+          message: 'Starting transcription process...',
+          progress: 0
+        });
+        
         console.log(`🔤 Starting transcription polling for job: ${concatenationResult.transcriptionJobId}`);
         
         // Poll for transcription completion
@@ -510,6 +539,11 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
             }
           } catch (error: any) {
             console.error(`❌ Transcription polling error:`, error);
+            setTranscriptionProgress({
+              stage: 'failed',
+              message: error.message || 'Transcription failed',
+              progress: 0
+            });
             clearInterval(pollInterval);
             // Don't fail the whole process for transcription errors
           }
@@ -518,7 +552,14 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         // Set a timeout to stop polling after 5 minutes
         setTimeout(() => {
           clearInterval(pollInterval);
-          console.warn(`⚠️ Transcription polling timeout after 5 minutes`);
+          if (transcriptionProgress.stage !== 'completed' && transcriptionProgress.stage !== 'failed') {
+            setTranscriptionProgress({
+              stage: 'timeout',
+              message: 'Transcription timed out after 5 minutes',
+              progress: 0
+            });
+            console.warn(`⚠️ Transcription polling timeout after 5 minutes`);
+          }
         }, 300000);
       } else {
         setGenerationProgress({ current: 1, total: 1, phase: 'completed' });
@@ -648,6 +689,13 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         setTranscriptionJobId(concatenationResult.transcriptionJobId);
         setGenerationProgress({ current: 0, total: 1, phase: 'transcribing' });
         
+        // Reset transcription progress
+        setTranscriptionProgress({
+          stage: 'starting',
+          message: 'Starting transcription process...',
+          progress: 0
+        });
+        
         console.log(`🔤 Starting transcription polling for segmented audio job: ${concatenationResult.transcriptionJobId}`);
         
         // Poll for transcription completion
@@ -670,6 +718,11 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
             }
           } catch (error: any) {
             console.error(`❌ Segmented audio transcription polling error:`, error);
+            setTranscriptionProgress({
+              stage: 'failed',
+              message: error.message || 'Transcription failed',
+              progress: 0
+            });
             clearInterval(pollInterval);
             // Don't fail the whole process for transcription errors
           }
@@ -678,7 +731,14 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         // Set a timeout to stop polling after 5 minutes
         setTimeout(() => {
           clearInterval(pollInterval);
-          console.warn(`⚠️ Segmented audio transcription polling timeout after 5 minutes`);
+          if (transcriptionProgress.stage !== 'completed' && transcriptionProgress.stage !== 'failed') {
+            setTranscriptionProgress({
+              stage: 'timeout',
+              message: 'Transcription timed out after 5 minutes',
+              progress: 0
+            });
+            console.warn(`⚠️ Segmented audio transcription polling timeout after 5 minutes`);
+          }
         }, 300000);
       } else {
         setGenerationProgress({ current: 1, total: 1, phase: 'completed' });
@@ -849,9 +909,87 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
                 )}
 
                 {generationProgress.phase === 'transcribing' && transcriptionJobId && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Transcription Job ID: {transcriptionJobId}</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                      <span className="font-medium">{transcriptionProgress.message}</span>
+                    </div>
+                    
+                    {/* Progress bar for transcription */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Stage: {transcriptionProgress.stage}</span>
+                        <span>{transcriptionProgress.progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                        <div 
+                          className="bg-green-600 h-2 rounded-full transition-all duration-500" 
+                          style={{ width: `${transcriptionProgress.progress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Job ID: {transcriptionJobId}</span>
+                    </div>
+                    
+                    {/* Stage-specific icons and descriptions */}
+                    <div className="flex items-center gap-2 text-xs">
+                      {transcriptionProgress.stage === 'starting' && (
+                        <>
+                          <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                          <span>Initializing transcription service...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'uploading' && (
+                        <>
+                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                          <span>Uploading audio to transcription service...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'preparing' && (
+                        <>
+                          <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                          <span>Preparing audio for analysis...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'transcribing' && (
+                        <>
+                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                          <span>AI is analyzing audio and generating transcript...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'downloading' && (
+                        <>
+                          <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                          <span>Downloading and saving transcript...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'completed' && (
+                        <>
+                          <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                          <span>Transcript ready!</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'failed' && (
+                        <>
+                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                          <span>Transcription encountered an error</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'timeout' && (
+                        <>
+                          <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                          <span>Transcription timed out - please try again</span>
+                        </>
+                      )}
+                      {!['starting', 'uploading', 'preparing', 'transcribing', 'downloading', 'completed', 'failed', 'timeout'].includes(transcriptionProgress.stage) && (
+                        <>
+                          <div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div>
+                          <span>Processing transcription...</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
