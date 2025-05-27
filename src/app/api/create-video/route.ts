@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
         },
         start: startTime,
         length: imageDuration,
-        effect: selectedEffect,
+        effect: "slideDown",
         fit: "cover"
       };
     });
@@ -140,26 +140,6 @@ export async function POST(request: NextRequest) {
             }]
         };
         tracks.push(audioTrack);
-    }
-
-    // Prepend dust overlay track if available (becomes the first track)
-    if (isOverlayAvailable) {
-      const overlayTrack = {
-        clips: [
-          {
-            asset: {
-              type: "video",
-              src: DUST_OVERLAY_URL,
-              volume: 0
-            },
-            start: 0,
-            length: totalDuration,
-            fit: "cover",
-            opacity: 0.5
-          }
-        ]
-      };
-      tracks.unshift(overlayTrack);
     }
     
     // Log the track structure for debugging

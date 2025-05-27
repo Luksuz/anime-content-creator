@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
       url: string; 
       startY: number; 
       endY: number; 
+      startX: number;
+      endX: number;
       height: number;
+      width: number;
     }[] = [];
 
     // Upload each cut image to Supabase
@@ -49,7 +52,10 @@ export async function POST(request: NextRequest) {
             url: publicUrl,
             startY: cutImage.startY,
             endY: cutImage.endY,
-            height: cutImage.height
+            startX: cutImage.startX || 0,
+            endX: cutImage.endX || cutImage.width || 0,
+            height: cutImage.height,
+            width: cutImage.width || 0
           });
           console.log(`✅ Piece ${i + 1} saved successfully: ${publicUrl}`);
         } else {

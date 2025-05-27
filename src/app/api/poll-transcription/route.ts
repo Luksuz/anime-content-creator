@@ -52,21 +52,45 @@ export async function POST(request: NextRequest) {
     let detailedStatus = 'processing';
     let userMessage = 'Processing transcription...';
     let stage = 'analyzing';
+    let estimatedProgress = progress;
 
     if (status === 'uploading' || status === 'uploaded') {
       stage = 'uploading';
-      userMessage = 'Uploading audio file for transcription...';
+      userMessage = 'Uploading audio file to transcription service...';
+      estimatedProgress = Math.max(progress, 10); // At least 10% for upload
     } else if (status === 'processing') {
       if (transcriptionStatus === 'processing') {
         stage = 'transcribing';
-        userMessage = 'Analyzing audio and generating transcript...';
-      } else {
+        userMessage = 'AI is analyzing audio and generating transcript...';
+        estimatedProgress = Math.max(progress, 40); // At least 40% when actively transcribing
+      } else if (transcriptionStatus === 'uploaded' || !transcriptionStatus) {
         stage = 'preparing';
-        userMessage = 'Preparing audio for transcription...';
+        userMessage = 'Preparing audio for AI analysis...';
+        estimatedProgress = Math.max(progress, 20); // At least 20% when preparing
+      } else {
+        stage = 'analyzing';
+        userMessage = 'Analyzing audio format and quality...';
+        estimatedProgress = Math.max(progress, 15); // At least 15% when analyzing
       }
     } else if (status === 'ready' && transcriptionStatus === 'processing') {
       stage = 'transcribing';
-      userMessage = 'Generating transcript from audio...';
+      userMessage = 'Finalizing transcript generation...';
+      estimatedProgress = Math.max(progress, 80); // At least 80% when finalizing
+    } else if (status === 'ready' && !transcriptionStatus) {
+      stage = 'preparing';
+      userMessage = 'Audio uploaded successfully, starting transcription...';
+      estimatedProgress = Math.max(progress, 30); // At least 30% when ready but not started
+    }
+
+    // Add more specific progress estimation based on stage
+    if (stage === 'uploading') {
+      estimatedProgress = Math.min(estimatedProgress, 25);
+    } else if (stage === 'preparing') {
+      estimatedProgress = Math.min(Math.max(estimatedProgress, 25), 40);
+    } else if (stage === 'analyzing') {
+      estimatedProgress = Math.min(Math.max(estimatedProgress, 40), 60);
+    } else if (stage === 'transcribing') {
+      estimatedProgress = Math.min(Math.max(estimatedProgress, 60), 90);
     }
 
     // If transcription is complete, download and save the SRT file
@@ -138,7 +162,7 @@ export async function POST(request: NextRequest) {
         status: 'processing',
         message: userMessage,
         stage: stage,
-        progress: Math.min(progress, 95), // Cap at 95% until actually complete
+        progress: Math.min(estimatedProgress, 95), // Cap at 95% until actually complete
         details: {
           shotstackStatus: status,
           transcriptionStatus: transcriptionStatus,

@@ -15,6 +15,7 @@ interface AudioChunk {
   chunkIndex: number;
   audioUrl: string;
   text: string;
+  duration: number;
 }
 
 interface ConcatenateAudioChunksRequestBody {
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
 
     // Calculate total duration and create segment info
     const totalText = sortedChunks.map(chunk => chunk.text).join(' ');
+    const totalDuration = sortedChunks.reduce((sum, chunk) => sum + chunk.duration, 0);
     
     return NextResponse.json({
       success: true,
@@ -145,8 +147,9 @@ export async function POST(request: NextRequest) {
         segmentIndex: chunk.chunkIndex,
         audioUrl: chunk.audioUrl,
         text: chunk.text,
-        duration: 0 // Will be calculated later if needed
+        duration: chunk.duration
       })),
+      totalDuration: totalDuration,
       totalSegments: sortedChunks.length,
       message: `Successfully concatenated ${sortedChunks.length} audio chunks${generateSubtitles ? ' and started transcription' : ''}`
     });

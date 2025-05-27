@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase } from '@/utils/supabase-utils';
+import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase, incrementApiKeyUsage } from '@/utils/supabase-utils';
 import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
 
     // Get a valid API key from the database
     const apiKey = await getValidApiKey();
+    console.log(`🔑 Using WellSaid Labs API key: ${apiKey}`);
     if (!apiKey) {
       return NextResponse.json(
         { error: 'No valid WellSaid Labs API keys available. Please upload API keys first.' },
@@ -310,6 +311,18 @@ export async function POST(request: NextRequest) {
       
       console.log(`☁️ Final audio uploaded to Supabase: ${finalPublicUrl}`);
       
+      // Increment API key usage after successful generation
+      const usageResult = await incrementApiKeyUsage(apiKey);
+      if (usageResult.success) {
+        if (usageResult.markedInvalid) {
+          console.log(`🚫 API key reached usage limit (${usageResult.newCount} uses) and was marked invalid`);
+        } else {
+          console.log(`📊 API key usage updated: ${usageResult.newCount}/50 uses`);
+        }
+      } else {
+        console.warn(`⚠️ Failed to update API key usage count, but audio generation was successful`);
+      }
+      
       // Calculate total duration
       const totalDuration = audioSegments.reduce((sum, segment) => sum + segment.duration, 0);
       
@@ -387,4 +400,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}

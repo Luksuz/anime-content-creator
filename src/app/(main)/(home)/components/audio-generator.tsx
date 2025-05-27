@@ -229,6 +229,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
     text: string;
     status: 'pending' | 'generating' | 'completed' | 'error';
     error?: string;
+    duration: number;
   }>>([]);
   const [generationProgress, setGenerationProgress] = useState<{
     current: number;
@@ -312,6 +313,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
   const generateAudioChunk = async (text: string, chunkIndex: number): Promise<{
     chunkIndex: number;
     audioUrl: string;
+    duration: number;
     text: string;
   }> => {
     const response = await fetch("/api/generate-audio-chunk", {
@@ -335,6 +337,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
     return {
       chunkIndex: data.chunkIndex,
       audioUrl: data.audioUrl,
+      duration: data.duration,
       text: data.text,
     };
   };
@@ -344,6 +347,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
     chunkIndex: number;
     audioUrl: string;
     text: string;
+    duration: number;
   }>): Promise<{
     finalAudioUrl: string;
     transcriptionJobId?: string;
@@ -442,6 +446,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         audioUrl: '',
         text: text,
         status: 'pending' as const,
+        duration: 0,
       }));
       setAudioChunks(initialChunks);
 
@@ -451,6 +456,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         chunkIndex: number;
         audioUrl: string;
         text: string;
+        duration: number;
       }> = [];
 
       for (let i = 0; i < textChunks.length; i += concurrencyLimit) {
@@ -473,7 +479,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
             // Update chunk status to completed
             setAudioChunks(prev => prev.map(chunk => 
               chunk.chunkIndex === chunkIndex 
-                ? { ...chunk, status: 'completed', audioUrl: result.audioUrl }
+                ? { ...chunk, status: 'completed', audioUrl: result.audioUrl, duration: result.duration }
                 : chunk
             ));
 
@@ -597,6 +603,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         audioUrl: '',
         text: narration.narration,
         status: 'pending' as const,
+        duration: 0,
       }));
       setAudioChunks(initialChunks);
 
@@ -606,6 +613,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
         chunkIndex: number;
         audioUrl: string;
         text: string;
+        duration: number;
       }> = [];
 
       for (let i = 0; i < generatedNarrations.length; i += concurrencyLimit) {
@@ -628,7 +636,7 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
             // Update chunk status to completed
             setAudioChunks(prev => prev.map(chunk => 
               chunk.chunkIndex === chunkIndex 
-                ? { ...chunk, status: 'completed', audioUrl: result.audioUrl }
+                ? { ...chunk, status: 'completed', audioUrl: result.audioUrl, duration: result.duration }
                 : chunk
             ));
 
@@ -674,9 +682,9 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
           segmentIndex: chunk.chunkIndex,
           audioUrl: chunk.audioUrl,
           text: chunk.text,
-          duration: 0 // Will be calculated later if needed
+          duration: chunk.duration // Use the actual duration from ffprobe
         })),
-        totalDuration: 0 // Will be calculated later if needed
+        totalDuration: completedChunks.reduce((sum, chunk) => sum + chunk.duration, 0) // Sum of individual durations
       };
 
       onAudioGenerated(concatenationResult.finalAudioUrl);
@@ -861,24 +869,6 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
 
         {/* Single Audio Generation */}
         <div className="space-y-4">
-          <Button 
-            className="w-full flex items-center justify-center gap-2" 
-            onClick={handleGenerateAudio}
-            disabled={isGeneratingAudio || !textToConvert.trim()}
-            size="lg"
-          >
-            {isGeneratingAudio ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span>Generating Audio...</span>
-              </>
-            ) : (
-              <>
-                <Volume2 className="h-5 w-5" />
-                <span>Generate Audio</span>
-              </>
-            )}
-          </Button>
 
           {/* Progress Display */}
           {isGeneratingAudio && generationProgress.total > 0 && (
@@ -921,75 +911,107 @@ const AudioGenerator: React.FC<AudioGeneratorProps> = ({
                         <span>Stage: {transcriptionProgress.stage}</span>
                         <span>{transcriptionProgress.progress}%</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                      <div className="w-full bg-gray-200 rounded-full h-3 dark:bg-gray-700 overflow-hidden">
                         <div 
-                          className="bg-green-600 h-2 rounded-full transition-all duration-500" 
+                          className="bg-gradient-to-r from-green-500 to-green-600 h-3 rounded-full transition-all duration-500 relative" 
                           style={{ width: `${transcriptionProgress.progress}%` }}
-                        ></div>
+                        >
+                          {/* Animated shimmer effect */}
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse"></div>
+                        </div>
                       </div>
                     </div>
                     
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span>Job ID: {transcriptionJobId}</span>
+                      {/* Estimated time remaining */}
+                      {transcriptionProgress.progress > 0 && transcriptionProgress.progress < 95 && (
+                        <span className="ml-auto">
+                          Est. {Math.max(1, Math.ceil((100 - transcriptionProgress.progress) / 10))} min remaining
+                        </span>
+                      )}
                     </div>
                     
                     {/* Stage-specific icons and descriptions */}
-                    <div className="flex items-center gap-2 text-xs">
+                    <div className="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-800 p-2 rounded">
                       {transcriptionProgress.stage === 'starting' && (
                         <>
                           <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                          <span>Initializing transcription service...</span>
+                          <span>🚀 Initializing transcription service...</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'uploading' && (
                         <>
                           <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                          <span>Uploading audio to transcription service...</span>
+                          <span>📤 Uploading audio to transcription service...</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'preparing' && (
                         <>
                           <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-                          <span>Preparing audio for analysis...</span>
+                          <span>⚙️ Preparing audio for AI analysis...</span>
+                        </>
+                      )}
+                      {transcriptionProgress.stage === 'analyzing' && (
+                        <>
+                          <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                          <span>🔍 Analyzing audio format and quality...</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'transcribing' && (
                         <>
                           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                          <span>AI is analyzing audio and generating transcript...</span>
+                          <span>🤖 AI is analyzing audio and generating transcript...</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'downloading' && (
                         <>
                           <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                          <span>Downloading and saving transcript...</span>
+                          <span>💾 Downloading and saving transcript...</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'completed' && (
                         <>
                           <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                          <span>Transcript ready!</span>
+                          <span>✅ Transcript ready!</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'failed' && (
                         <>
                           <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                          <span>Transcription encountered an error</span>
+                          <span>❌ Transcription encountered an error</span>
                         </>
                       )}
                       {transcriptionProgress.stage === 'timeout' && (
                         <>
                           <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                          <span>Transcription timed out - please try again</span>
+                          <span>⏰ Transcription timed out - please try again</span>
                         </>
                       )}
-                      {!['starting', 'uploading', 'preparing', 'transcribing', 'downloading', 'completed', 'failed', 'timeout'].includes(transcriptionProgress.stage) && (
+                      {!['starting', 'uploading', 'preparing', 'analyzing', 'transcribing', 'downloading', 'completed', 'failed', 'timeout'].includes(transcriptionProgress.stage) && (
                         <>
                           <div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div>
-                          <span>Processing transcription...</span>
+                          <span>⚡ Processing transcription...</span>
                         </>
                       )}
                     </div>
+
+                    {/* Additional progress details */}
+                    {transcriptionProgress.progress > 0 && (
+                      <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                        <div className="flex justify-between items-center">
+                          <span>Progress Details:</span>
+                          <span className="font-mono">{transcriptionProgress.progress.toFixed(1)}%</span>
+                        </div>
+                        <div className="mt-1 text-xs">
+                          {transcriptionProgress.progress < 25 && "🔄 Setting up transcription pipeline..."}
+                          {transcriptionProgress.progress >= 25 && transcriptionProgress.progress < 50 && "🎵 Processing audio data..."}
+                          {transcriptionProgress.progress >= 50 && transcriptionProgress.progress < 75 && "🧠 AI model analyzing speech patterns..."}
+                          {transcriptionProgress.progress >= 75 && transcriptionProgress.progress < 95 && "📝 Generating final transcript..."}
+                          {transcriptionProgress.progress >= 95 && "🎯 Finalizing and saving results..."}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase } from '@/utils/supabase-utils';
+import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase, incrementApiKeyUsage } from '@/utils/supabase-utils';
 import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
@@ -171,6 +171,18 @@ export async function POST(request: NextRequest) {
 
       console.log(`☁️ Single chunk audio uploaded to Supabase: ${publicUrl}`);
       
+      // Increment API key usage after successful generation
+      const usageResult = await incrementApiKeyUsage(apiKey);
+      if (usageResult.success) {
+        if (usageResult.markedInvalid) {
+          console.log(`🚫 API key reached usage limit (${usageResult.newCount} uses) and was marked invalid`);
+        } else {
+          console.log(`📊 API key usage updated: ${usageResult.newCount}/50 uses`);
+        }
+      } else {
+        console.warn(`⚠️ Failed to update API key usage count, but audio generation was successful`);
+      }
+      
       return NextResponse.json({
         success: true,
         audioUrl: publicUrl,
@@ -229,6 +241,18 @@ export async function POST(request: NextRequest) {
       }
 
       console.log(`☁️ Concatenated audio uploaded to Supabase: ${publicUrl}`);
+      
+      // Increment API key usage after successful generation
+      const usageResult = await incrementApiKeyUsage(apiKey);
+      if (usageResult.success) {
+        if (usageResult.markedInvalid) {
+          console.log(`🚫 API key reached usage limit (${usageResult.newCount} uses) and was marked invalid`);
+        } else {
+          console.log(`📊 API key usage updated: ${usageResult.newCount}/50 uses`);
+        }
+      } else {
+        console.warn(`⚠️ Failed to update API key usage count, but audio generation was successful`);
+      }
       
       return NextResponse.json({
         success: true,

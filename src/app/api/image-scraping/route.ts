@@ -130,31 +130,31 @@ export async function POST(request: NextRequest) {
     console.log(`📊 Screenshot downloaded: ${screenshotBuffer.length} bytes`);
 
     // Upload to Supabase
-    const timestamp = Date.now();
+        const timestamp = Date.now();
     const fileName = `firecrawl_${timestamp}.png`;
-    const destinationPath = `${userId}/screenshots/${fileName}`;
-    
-    console.log('☁️ Uploading to Supabase...');
-    const publicUrl = await uploadFileToSupabase(
-      screenshotBuffer,
-      destinationPath,
+        const destinationPath = `${userId}/screenshots/${fileName}`;
+        
+        console.log('☁️ Uploading to Supabase...');
+        const publicUrl = await uploadFileToSupabase(
+          screenshotBuffer,
+          destinationPath,
       'image/png'
-    );
+        );
 
-    if (!publicUrl) {
-      throw new Error('Failed to upload screenshot to Supabase');
-    }
+        if (!publicUrl) {
+          throw new Error('Failed to upload screenshot to Supabase');
+        }
 
     console.log('✅ Firecrawl screenshot completed:', publicUrl);
 
-    return NextResponse.json({
-      success: true,
-      screenshotUrl: publicUrl,
+        return NextResponse.json({
+          success: true,
+          screenshotUrl: publicUrl,
       originalFirecrawlUrl: screenshotUrl,
       message: 'Screenshot captured successfully using Firecrawl API',
-      metadata: {
-        fileSize: screenshotBuffer.length,
-        timestamp: timestamp,
+          metadata: {
+            fileSize: screenshotBuffer.length,
+            timestamp: timestamp,
         firecrawlMetadata: firecrawlData.data?.metadata || {}
       }
     });

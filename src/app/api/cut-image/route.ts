@@ -3,15 +3,29 @@ import sharp from 'sharp';
 
 export async function POST(request: NextRequest) {
   try {
-    const { imageUrl, cutPositions, userId = 'unknown_user' } = await request.json();
+    const { 
+      imageUrl, 
+      cutPositions, 
+      xCutPositions = [], 
+      userId = 'unknown_user' 
+    } = await request.json();
 
-    if (!imageUrl || !cutPositions || !Array.isArray(cutPositions)) {
+    if (!imageUrl || (!cutPositions && !xCutPositions)) {
       return NextResponse.json({ 
-        error: 'Image URL and cut positions array are required' 
+        error: 'Image URL and at least one type of cut positions are required' 
       }, { status: 400 });
     }
 
-    console.log(`Cutting image: ${imageUrl} at positions:`, cutPositions);
+    // Validate X-axis cuts (maximum 2 allowed)
+    if (xCutPositions && Array.isArray(xCutPositions) && xCutPositions.length > 2) {
+      return NextResponse.json({ 
+        error: 'Maximum 2 X-axis cuts allowed' 
+      }, { status: 400 });
+    }
+
+    console.log(`Cutting image: ${imageUrl}`);
+    console.log(`Y-axis positions:`, cutPositions || []);
+    console.log(`X-axis positions:`, xCutPositions || []);
 
     // Download the image
     const response = await fetch(imageUrl);
@@ -31,111 +45,65 @@ export async function POST(request: NextRequest) {
 
     console.log(`Image dimensions: ${metadata.width}x${metadata.height}`);
 
-    // Validate and clamp cut positions to image bounds
-    const validCutPositions = cutPositions
-      .map((pos: number) => Math.max(0, Math.min(pos, metadata.height! - 10))) // Leave 10px margin from bottom
-      .filter((pos: number, index: number, arr: number[]) => {
-        // Remove duplicates and positions too close to each other (minimum 20px apart)
-        return index === 0 || Math.abs(pos - arr[index - 1]) >= 20;
-      });
+    // Process Y-axis cuts (vertical cuts)
+    let validYCutPositions: number[] = [];
+    if (cutPositions && Array.isArray(cutPositions)) {
+      validYCutPositions = cutPositions
+        .map((pos: number) => Math.max(0, Math.min(pos, metadata.height! - 10)))
+        .filter((pos: number, index: number, arr: number[]) => {
+          return index === 0 || Math.abs(pos - arr[index - 1]) >= 20;
+        });
+    }
 
-    console.log(`Original cut positions:`, cutPositions);
-    console.log(`Valid cut positions:`, validCutPositions);
+    // Process X-axis cuts (horizontal cuts)
+    let validXCutPositions: number[] = [];
+    if (xCutPositions && Array.isArray(xCutPositions)) {
+      validXCutPositions = xCutPositions
+        .map((pos: number) => Math.max(0, Math.min(pos, metadata.width! - 10)))
+        .filter((pos: number, index: number, arr: number[]) => {
+          return index === 0 || Math.abs(pos - arr[index - 1]) >= 20;
+        })
+        .sort((a: number, b: number) => a - b);
+      
+      // For X-axis cuts, we require exactly 2 cuts to extract the middle section
+      if (validXCutPositions.length > 0 && validXCutPositions.length !== 2) {
+        return NextResponse.json({ 
+          error: 'X-axis cutting requires exactly 2 cuts to extract the middle section. Please add exactly 2 horizontal cuts.' 
+        }, { status: 400 });
+      }
+    }
 
-    // Sort cut positions and add start and end points
-    const sortedPositions = [0, ...validCutPositions.sort((a: number, b: number) => a - b), metadata.height! - 5]; // Leave 5px margin from bottom
-    
-    // Remove duplicate positions
-    const uniquePositions = Array.from(new Set(sortedPositions));
-    
-    console.log(`Final positions for cutting:`, uniquePositions);
-    
+    console.log(`Valid Y-axis positions:`, validYCutPositions);
+    console.log(`Valid X-axis positions:`, validXCutPositions);
+
+    // Determine cutting strategy
+    const hasYCuts = validYCutPositions.length > 0;
+    const hasXCuts = validXCutPositions.length > 0;
+
     const cutImages: { 
       dataUrl: string; 
       startY: number; 
       endY: number; 
+      startX: number;
+      endX: number;
       height: number;
-      buffer: string; // base64 encoded buffer for later saving
+      width: number;
+      buffer: string;
     }[] = [];
 
-    // Cut the image into pieces (but don't upload yet)
-    for (let i = 0; i < uniquePositions.length - 1; i++) {
-      const startY = Math.floor(uniquePositions[i]);
-      const endY = Math.floor(uniquePositions[i + 1]);
-      const height = endY - startY;
-
-      // Skip pieces that are too small (less than 20px height)
-      if (height < 20) {
-        console.log(`Skipping piece ${i + 1}: too small (height: ${height}px)`);
-        continue;
-      }
-
-      // More conservative bounds checking
-      const maxAllowedHeight = metadata.height! - startY - 5; // Always leave 5px margin
-      const safeHeight = Math.min(height, maxAllowedHeight);
-      
-      if (safeHeight < 10) {
-        console.log(`Skipping piece ${i + 1}: safe height too small (${safeHeight}px)`);
-        continue;
-      }
-
-      const extractParams = {
-        left: 0,
-        top: startY,
-        width: metadata.width!,
-        height: safeHeight
-      };
-
-      // Final validation before extraction
-      if (extractParams.top < 0 || 
-          extractParams.left < 0 || 
-          extractParams.width <= 0 || 
-          extractParams.height <= 0 ||
-          extractParams.top + extractParams.height >= metadata.height! ||
-          extractParams.left + extractParams.width > metadata.width!) {
-        console.log(`Skipping piece ${i + 1}: invalid extract parameters`, extractParams);
-        continue;
-      }
-
-      console.log(`Cutting piece ${i + 1}: Y ${startY} to ${endY} (height: ${height})`);
-
-      try {
-        // Create a fresh Sharp instance for each extraction to avoid any state issues
-        const freshImage = sharp(imageBuffer);
-        
-        // Extract the piece as PNG buffer
-        const piece = await freshImage
-          .extract({
-            left: 0,
-            top: extractParams.top,
-            width: extractParams.width,
-            height: extractParams.height
-          })
-          .png()
-          .toBuffer();
-
-        // Convert to base64 data URL for preview
-        const base64 = piece.toString('base64');
-        const dataUrl = `data:image/png;base64,${base64}`;
-
-        cutImages.push({
-          dataUrl: dataUrl,
-          startY,
-          endY,
-          height: extractParams.height,
-          buffer: base64 // Store base64 for later saving
-        });
-        
-        console.log(`✅ Piece ${i + 1} processed successfully`);
-      } catch (extractError: any) {
-        console.error(`❌ Error extracting piece ${i + 1}:`, extractError.message);
-        console.error(`Failed extract params:`, extractParams);
-        console.error(`Image metadata:`, { width: metadata.width, height: metadata.height });
-        
-        // Skip this piece and continue with the next one
-        console.log(`⏭️ Skipping piece ${i + 1} and continuing with next piece`);
-        continue;
-      }
+    if (hasXCuts && hasYCuts) {
+      // Both X and Y cuts - create a grid
+      await processGridCuts(imageBuffer, metadata, validXCutPositions, validYCutPositions, cutImages);
+    } else if (hasXCuts) {
+      // Only X cuts - horizontal strips
+      await processXAxisCuts(imageBuffer, metadata, validXCutPositions, cutImages);
+    } else if (hasYCuts) {
+      // Only Y cuts - vertical strips (original behavior)
+      await processYAxisCuts(imageBuffer, metadata, validYCutPositions, cutImages);
+    } else {
+      return NextResponse.json({ 
+        error: 'No valid cut positions provided' 
+      }, { status: 400 });
     }
 
     return NextResponse.json({
@@ -151,6 +119,216 @@ export async function POST(request: NextRequest) {
       error: 'Failed to cut image',
       details: error.message 
     }, { status: 500 });
+  }
+}
+
+// Process Y-axis cuts (original vertical cutting)
+async function processYAxisCuts(
+  imageBuffer: Buffer, 
+  metadata: any, 
+  validYCutPositions: number[], 
+  cutImages: any[]
+) {
+  const sortedPositions = [0, ...validYCutPositions.sort((a: number, b: number) => a - b), metadata.height! - 5];
+  const uniquePositions = Array.from(new Set(sortedPositions));
+  
+  for (let i = 0; i < uniquePositions.length - 1; i++) {
+    const startY = Math.floor(uniquePositions[i]);
+    const endY = Math.floor(uniquePositions[i + 1]);
+    const height = endY - startY;
+
+    if (height < 20) continue;
+
+    const maxAllowedHeight = metadata.height! - startY - 5;
+    const safeHeight = Math.min(height, maxAllowedHeight);
+    
+    if (safeHeight < 10) continue;
+
+    const extractParams = {
+      left: 0,
+      top: startY,
+      width: metadata.width!,
+      height: safeHeight
+    };
+
+    if (extractParams.top < 0 || extractParams.left < 0 || 
+        extractParams.width <= 0 || extractParams.height <= 0 ||
+        extractParams.top + extractParams.height >= metadata.height! ||
+        extractParams.left + extractParams.width > metadata.width!) {
+      continue;
+    }
+
+    try {
+      const freshImage = sharp(imageBuffer);
+      const piece = await freshImage
+        .extract(extractParams)
+        .png()
+        .toBuffer();
+
+      const base64 = piece.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64}`;
+
+      cutImages.push({
+        dataUrl: dataUrl,
+        startY,
+        endY,
+        startX: 0,
+        endX: metadata.width!,
+        height: extractParams.height,
+        width: extractParams.width,
+        buffer: base64
+      });
+    } catch (extractError: any) {
+      console.error(`Error extracting Y-axis piece:`, extractError.message);
+      continue;
+    }
+  }
+}
+
+// Process X-axis cuts (horizontal cutting)
+async function processXAxisCuts(
+  imageBuffer: Buffer, 
+  metadata: any, 
+  validXCutPositions: number[], 
+  cutImages: any[]
+) {
+  // For X-axis cuts, we require exactly 2 cuts to extract the middle section
+  if (validXCutPositions.length !== 2) {
+    throw new Error('X-axis cutting requires exactly 2 cuts to extract the middle section');
+  }
+
+  const sortedPositions = validXCutPositions.sort((a: number, b: number) => a - b);
+  
+  // Only extract the middle section (between the two cuts)
+  const startX = Math.floor(sortedPositions[0]);
+  const endX = Math.floor(sortedPositions[1]);
+  const width = endX - startX;
+
+  if (width < 20) {
+    throw new Error('Middle section is too narrow (less than 20px)');
+  }
+
+  const maxAllowedWidth = metadata.width! - startX - 5;
+  const safeWidth = Math.min(width, maxAllowedWidth);
+  
+  if (safeWidth < 10) {
+    throw new Error('Middle section width is too small');
+  }
+
+  const extractParams = {
+    left: startX,
+    top: 0,
+    width: safeWidth,
+    height: metadata.height!
+  };
+
+  if (extractParams.top < 0 || extractParams.left < 0 || 
+      extractParams.width <= 0 || extractParams.height <= 0 ||
+      extractParams.top + extractParams.height > metadata.height! ||
+      extractParams.left + extractParams.width >= metadata.width!) {
+    throw new Error('Invalid extraction parameters for middle section');
+  }
+
+  try {
+    const freshImage = sharp(imageBuffer);
+    const piece = await freshImage
+      .extract(extractParams)
+      .png()
+      .toBuffer();
+
+    const base64 = piece.toString('base64');
+    const dataUrl = `data:image/png;base64,${base64}`;
+
+    cutImages.push({
+      dataUrl: dataUrl,
+      startY: 0,
+      endY: metadata.height!,
+      startX,
+      endX,
+      height: extractParams.height,
+      width: extractParams.width,
+      buffer: base64
+    });
+
+    console.log(`✅ Middle section extracted: X ${startX} to ${endX} (width: ${extractParams.width}px)`);
+  } catch (extractError: any) {
+    console.error(`Error extracting middle section:`, extractError.message);
+    throw new Error(`Failed to extract middle section: ${extractError.message}`);
+  }
+}
+
+// Process both X and Y cuts (grid cutting)
+async function processGridCuts(
+  imageBuffer: Buffer, 
+  metadata: any, 
+  validXCutPositions: number[], 
+  validYCutPositions: number[], 
+  cutImages: any[]
+) {
+  // For X-axis cuts, we require exactly 2 cuts to extract the middle section
+  if (validXCutPositions.length !== 2) {
+    throw new Error('X-axis cutting requires exactly 2 cuts to extract the middle section');
+  }
+
+  // For X-axis: only use the middle section (between the two cuts)
+  const sortedXPositions = validXCutPositions.sort((a: number, b: number) => a - b);
+  const middleStartX = Math.floor(sortedXPositions[0]);
+  const middleEndX = Math.floor(sortedXPositions[1]);
+  
+  // For Y-axis: use all cuts to create horizontal strips
+  const sortedYPositions = [0, ...validYCutPositions.sort((a: number, b: number) => a - b), metadata.height! - 5];
+  const uniqueYPositions = Array.from(new Set(sortedYPositions));
+  
+  // Create pieces only from the middle X section, but all Y sections
+  for (let j = 0; j < uniqueYPositions.length - 1; j++) {
+    const startY = Math.floor(uniqueYPositions[j]);
+    const endY = Math.floor(uniqueYPositions[j + 1]);
+    
+    const width = middleEndX - middleStartX;
+    const height = endY - startY;
+
+    if (width < 20 || height < 20) continue;
+
+    const extractParams = {
+      left: middleStartX,
+      top: startY,
+      width: Math.min(width, metadata.width! - middleStartX - 5),
+      height: Math.min(height, metadata.height! - startY - 5)
+    };
+
+    if (extractParams.top < 0 || extractParams.left < 0 || 
+        extractParams.width <= 0 || extractParams.height <= 0 ||
+        extractParams.top + extractParams.height >= metadata.height! ||
+        extractParams.left + extractParams.width >= metadata.width!) {
+      continue;
+    }
+
+    try {
+      const freshImage = sharp(imageBuffer);
+      const piece = await freshImage
+        .extract(extractParams)
+        .png()
+        .toBuffer();
+
+      const base64 = piece.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64}`;
+
+      cutImages.push({
+        dataUrl: dataUrl,
+        startY,
+        endY,
+        startX: middleStartX,
+        endX: middleEndX,
+        height: extractParams.height,
+        width: extractParams.width,
+        buffer: base64
+      });
+
+      console.log(`✅ Grid piece extracted: X ${middleStartX}-${middleEndX}, Y ${startY}-${endY}`);
+    } catch (extractError: any) {
+      console.error(`Error extracting grid piece:`, extractError.message);
+      continue;
+    }
   }
 }
 

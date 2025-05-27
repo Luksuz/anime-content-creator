@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase } from "@/utils/supabase-utils";
+import { getValidApiKey, markApiKeyAsInvalid, uploadFileToSupabase, incrementApiKeyUsage } from "@/utils/supabase-utils";
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
+const execAsync = promisify(exec);
 const WELLSAID_API_URL = 'https://api.wellsaidlabs.com/v1/tts/stream';
 
 interface GenerateAudioChunkRequestBody {
@@ -20,6 +23,27 @@ const isRateLimitError = (status: number, errorText: string): boolean => {
          errorText.toLowerCase().includes('rate limit') ||
          errorText.toLowerCase().includes('too many requests');
 };
+
+// Helper function to get audio duration using ffprobe
+async function getAudioDuration(audioUrl: string): Promise<number> {
+  try {
+    console.log(`📏 Extracting duration for audio chunk: ${audioUrl.split('/').pop()}`);
+    
+    const { stdout } = await execAsync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioUrl}"`);
+    const duration = parseFloat(stdout.trim());
+    
+    if (isNaN(duration) || duration <= 0) {
+      console.warn(`⚠️ Invalid duration detected (${stdout.trim()}), using fallback`);
+      return 3.0; // Fallback duration
+    }
+    
+    console.log(`⏱️ Duration extracted: ${duration.toFixed(2)}s`);
+    return duration;
+  } catch (error) {
+    console.warn('⚠️ ffprobe failed, using fallback duration:', error);
+    return 3.0; // Fallback duration
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,15 +73,14 @@ export async function POST(request: NextRequest) {
       attemptCount++;
       
       // Get a valid API key from the database
-    //   const apiKey = await getValidApiKey();
-    //   if (!apiKey) {
-    //     console.log(`❌ No valid API keys available after ${attemptCount} attempts`);
-    //     return NextResponse.json(
-    //       { error: 'No valid WellSaid Labs API keys available. Please upload API keys first.' },
-    //       { status: 400 }
-    //     );
-    //   }
-      const apiKey = "3ae0d806-3e6a-4ba5-a0d8-063e6a6ba50c"
+      const apiKey = await getValidApiKey();
+      if (!apiKey) {
+        console.log(`❌ No valid API keys available after ${attemptCount} attempts`);
+        return NextResponse.json(
+          { error: 'No valid WellSaid Labs API keys available. Please upload API keys first.' },
+          { status: 400 }
+        );
+      }
 
       console.log(`🔑 Attempt ${attemptCount}: Using WellSaid Labs API key for chunk ${chunkIndex} generation`);
 
@@ -108,7 +131,12 @@ export async function POST(request: NextRequest) {
           // If API key is invalid (401/403), mark it as invalid and try next key
           if (wellsaidResponse.status === 401 || wellsaidResponse.status === 403) {
             console.log(`🚫 Marking API key as invalid due to ${wellsaidResponse.status} error (attempt ${attemptCount})`);
-            await markApiKeyAsInvalid(apiKey);
+            const markResult = await markApiKeyAsInvalid(apiKey);
+            if (markResult) {
+              console.log(`✅ Successfully marked API key as invalid in database`);
+            } else {
+              console.warn(`⚠️ Failed to mark API key as invalid in database`);
+            }
             
             // Reset rate limit retries when switching to a new key
             rateLimitRetries = 0;
@@ -139,12 +167,28 @@ export async function POST(request: NextRequest) {
 
         console.log(`✅ Audio chunk ${chunkIndex} generated and uploaded successfully on attempt ${attemptCount}: ${audioUrl}`);
 
+        // Extract duration using ffprobe
+        const duration = await getAudioDuration(audioUrl);
+
+        // Increment API key usage after successful generation
+        const usageResult = await incrementApiKeyUsage(apiKey);
+        if (usageResult.success) {
+          if (usageResult.markedInvalid) {
+            console.log(`🚫 API key reached usage limit (${usageResult.newCount} uses) and was marked invalid`);
+          } else {
+            console.log(`📊 API key usage updated: ${usageResult.newCount}/50 uses`);
+          }
+        } else {
+          console.warn(`⚠️ Failed to update API key usage count, but audio generation was successful`);
+        }
+
         return NextResponse.json({
           success: true,
           chunkIndex: chunkIndex,
           audioUrl: audioUrl,
+          duration: duration,
           text: text,
-          message: `Audio chunk ${chunkIndex} generated successfully on attempt ${attemptCount}`
+          message: `Audio chunk ${chunkIndex} generated successfully on attempt ${attemptCount} (${duration.toFixed(2)}s)`
         });
 
       } catch (apiError: any) {
